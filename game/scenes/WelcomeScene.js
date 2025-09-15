@@ -318,7 +318,7 @@ export class WelcomeScene extends Phaser.Scene {
     async _apiRegister(username, password) {
         this._info('Registering...');
         try {
-            const res = await fetch('http://localhost:3000/api/register', {
+            const res = await fetch('https://testing12-2t2h.onrender.com/api/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -397,4 +397,5 @@ export class WelcomeScene extends Phaser.Scene {
             });
         });
     }
+
 }
