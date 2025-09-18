@@ -1,5 +1,6 @@
 import { loadTextures } from '../textures.js';
 import { createPlayerTexture } from '../player/assets/sprite.js';
+import { registerPuffleFromGifs } from '../player/assets/puffleGif.js';
 
 export class PreloadScene extends Phaser.Scene {
     constructor() { super('PreloadScene'); }
@@ -13,8 +14,22 @@ export class PreloadScene extends Phaser.Scene {
 
         loadTextures(this);
         // eyes image needed before createPlayerTexture compose
-        this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+        this.load.binary('puf_back_gif',           'game/player/assets/puf_back.gif');
+        this.load.binary('puf_back_left_gif',      'game/player/assets/puf_back_left.gif');
+        this.load.binary('puf_side_gif',           'game/player/assets/puf_side.gif');
+        this.load.binary('puf_three_quarter_gif',  'game/player/assets/puf_three_quarter.gif');
+        this.load.binary('puf_front_gif',          'game/player/assets/puf_front.gif');
+
+        this.load.once(Phaser.Loader.Events.COMPLETE, async () => {
+            // Fallback player texture
             createPlayerTexture(this);
+
+            try {
+                await registerPuffleFromGifs(this);
+                console.log('[Puffle] ready:', this.registry.get('pufReady'), this.registry.get('pufFirstFrame'));
+            } catch (e) {
+                console.warn('[Puffle] failed:', e);
+            }
         });
 
         this.load.on('progress', (p) => {

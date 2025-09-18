@@ -40,7 +40,7 @@ export class WelcomeScene extends Phaser.Scene {
         redrawPanel();
         this.panel = panelG;
 
-        this.title = this.add.text(centerX, centerY - panelH/2 + 60, 'Experimental Fluffs', {
+        this.title = this.add.text(centerX, centerY - panelH/2 + 60, 'Experimental Puffles', {
             fontFamily:'Arial', fontSize:'40px', color:'#ffffff', stroke:'#002a44', strokeThickness:4
         }).setOrigin(0.5).setDepth(DEPTH.UI);
 
@@ -318,7 +318,7 @@ export class WelcomeScene extends Phaser.Scene {
     async _apiRegister(username, password) {
         this._info('Registering...');
         try {
-            const res = await fetch('https://testing12-2t2h.onrender.com/api/register', {
+            const res = await fetch('http://localhost:3000/api/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -397,5 +397,4 @@ export class WelcomeScene extends Phaser.Scene {
             });
         });
     }
-
 }

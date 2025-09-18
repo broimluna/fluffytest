@@ -3,13 +3,29 @@ export class MainPlayerManager {
         this.scene = scene;
         this.movementEnabled = true;
 
-        this.player = this.scene.physics.add.sprite(400, 300, 'player');
-        this.player.setCollideWorldBounds(true);
-        this.player.body.setSize(28, 28);
-        this.player.body.setOffset(6, 6);
-        this.player.setData('baseRadius', 24); // <-- add stable radius
+        const usePuf = !!scene.registry.get('pufReady');
+        const startKey = usePuf ? (scene.registry.get('pufFirstFrame') || 'player') : 'player';
 
-        this.eyes = this.scene.add.sprite(400, 300, 'eyes').setScale(0.1).setDepth(10);
+        this.player = this.scene.physics.add.sprite(400, 300, startKey);
+        this.player.setCollideWorldBounds(true);
+
+        // Fallback ball hitbox
+        if (!usePuf) {
+            this.player.body.setSize(28, 28);
+            this.player.body.setOffset(6, 6);
+        }
+        this.player.setData('baseRadius', 24);
+
+        // Scale GIF visual, then match hitbox to GIF size
+        if (usePuf) {
+            this._applyPufScale(48);
+            this._syncBodyToSprite(); // <-- hitbox = current GIF frame size
+            // keep body in sync if frames vary in size
+            this.player.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => this._syncBodyToSprite());
+        }
+
+        // Eyes overlay only for fallback ball
+        this.eyes = usePuf ? null : this.scene.add.sprite(400, 300, 'eyes').setScale(0.1).setDepth(10);
 
         this.name = '';
         this.nameText = this.scene.add.text(
@@ -47,12 +63,119 @@ export class MainPlayerManager {
 
         this.scene.events.on('player-input', this.handleInput, this);
         this.scene.events.on('player-move-to-target', this.moveToTarget, this);
+
+        if (usePuf && this.scene.anims.exists('puf-front')) {
+            this.player.anims.play('puf-front');
+            const ts = this.scene.registry.get('pufAnimTimeScale') || 1;
+            this.player.anims.timeScale = ts;
+        }
+
+        // Hot-swap if GIFs finish after this object is created
+        this.scene.registry.events.on('changedata', (parent, key, value) => {
+            if (key === 'pufReady' && value) this._applyPufAppearance();
+        });
+    }
+
+    _applyPufScale(desiredHeight = 48) {
+        // Keep physics body the same; only scale the visual
+        const h = this.player.height; // current frame height at scale 1
+        if (h > 0) this.player.setScale(desiredHeight / h);
+    }
+
+    _syncBodyToSprite() {
+        // Match Arcade body to current on-screen GIF size
+        if (!this.player?.body) return;
+        const w = Math.max(1, Math.round(this.player.displayWidth));
+        const h = Math.max(1, Math.round(this.player.displayHeight));
+        this.player.body.setSize(w, h, true); // true => recenter offset
+    }
+
+    _applyPufAppearance() {
+        const first = this.scene.registry.get('pufFirstFrame');
+        if (first) this.player.setTexture(first);
+        this._applyPufScale(48);
+        this._syncBodyToSprite(); // <-- ensure hitbox matches after swap/scale
+        if (this.scene.anims.exists('puf-front')) this.player.anims.play('puf-front', true);
+        const ts = this.scene.registry.get('pufAnimTimeScale') || 1;
+        this.player.anims.timeScale = ts;
+        if (this.eyes) { this.eyes.destroy(); this.eyes = null; }
+        // Stop legacy rotation for GIF character
+        this.player.rotation = 0;
+
+        // keep body synced on frame changes too
+        this.player.off(Phaser.Animations.Events.ANIMATION_UPDATE); // avoid duplicate listeners
+        this.player.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => this._syncBodyToSprite());
     }
 
     playAnim() {}
     updateDirectionalAnim(vx, vy) {
-        if (vx < -1) this.player.setFlipX(true);
-        else if (vx > 1) this.player.setFlipX(false);
+        const usePuf = !!this.scene.registry.get('pufReady');
+        if (!usePuf) return;
+
+        // Use angle sectors with tolerance to avoid wrong anim on diagonals
+        const speed = Math.hypot(vx, vy);
+        if (speed < 1 && !this._autoMove) {
+            if (this.scene.anims.exists('puf-front') && this.player.anims.currentAnim?.key !== 'puf-front') {
+                this.player.anims.play('puf-front', true);
+            }
+            return;
+        }
+
+        const angle = Math.atan2(vy, vx); // 0 = right, -PI/2 = up
+        const deg = Phaser.Math.RadToDeg(angle);
+
+        // Cones around axes (degrees)
+        const VERT_CONE = 28;      // ± around straight up
+        const UP_DIAG_MAX = 70;    // beyond this from up, treat as side/other
+        const HORZ_CONE = 28;      // ± around straight right/left
+
+        const baseFacesRight = this.scene.registry.get('pufBaseFacesRight');
+        const faceRightFlip = (wantRight) => (baseFacesRight === true ? !wantRight : !!wantRight);
+
+        let anim = 'puf-front';
+        let flipX = false;
+
+        // Helper: distance from "up" direction (-90 degrees)
+        const upDelta = Math.abs(deg + 90);
+
+        if (vy < 0) {
+            // Moving upwards
+            if (upDelta <= VERT_CONE && this.scene.anims.exists('puf-back')) {
+                // Mostly straight up
+                anim = 'puf-back';
+                flipX = false;
+            } else if (upDelta <= UP_DIAG_MAX && this.scene.anims.exists('puf-backLeft')) {
+                // Up-diagonal: always use back_left and flip for right
+                anim = 'puf-backLeft';
+                flipX = faceRightFlip(vx > 0);
+            } else if (this.scene.anims.exists('puf-side')) {
+                // Farther from up -> treat as side
+                anim = 'puf-side';
+                flipX = faceRightFlip(vx > 0);
+            }
+        } else {
+            // Moving downwards or mostly horizontal
+            const rightDelta = Math.abs(deg - 0);
+            const leftDelta = Math.abs(Math.abs(deg) - 180);
+
+            if ((rightDelta <= HORZ_CONE || leftDelta <= HORZ_CONE) && this.scene.anims.exists('puf-side')) {
+                anim = 'puf-side';
+                flipX = faceRightFlip(vx > 0);
+            } else if (this.scene.anims.exists('puf-threeQuarter') && Math.abs(vx) > 1 && Math.abs(vy) > 1) {
+                anim = 'puf-threeQuarter';
+                flipX = faceRightFlip(vx > 0);
+            } else if (this.scene.anims.exists('puf-front')) {
+                anim = 'puf-front';
+                flipX = faceRightFlip(vx > 0 && Math.abs(vx) > 1); // slight lean when down-diagonal
+            }
+        }
+
+        this.player.setFlipX(!!flipX);
+        if (this.scene.anims.exists(anim) && this.player.anims.currentAnim?.key !== anim) {
+            this.player.anims.play(anim, true);
+        }
+        const ts = this.scene.registry.get('pufAnimTimeScale') || 1;
+        this.player.anims.timeScale = ts;
     }
 
     disableMovement() {
@@ -160,9 +283,11 @@ export class MainPlayerManager {
     }
 
     update(time, delta) {
-        // Eyes sync
-        this.eyes.x = this.player.x;
-        this.eyes.y = this.player.y;
+        // Keep fallback eyes aligned
+        if (this.eyes) {
+            this.eyes.x = this.player.x;
+            this.eyes.y = this.player.y;
+        }
 
         // Use fixed radius so name doesn't drift when any scaling/rotation changes bounds
         const R = this.player.getData('baseRadius') || 24;
@@ -189,14 +314,17 @@ export class MainPlayerManager {
         const dx = this.player.x - this._prevX;
         const dy = this.player.y - this._prevY;
         const dist = Math.hypot(dx, dy);
-        if (dist > 0 && dist < this._maxStepForRoll) {
-            const dr = dist / this.rollRadius; // theta = s / r
-            this.player.rotation += dr;
-            if (this.eyes) this.eyes.rotation = -this.player.rotation; // keep eyes upright
-        } else if (dist >= this._maxStepForRoll) {
-            // teleport: reset rotation smoothing (optional)
-            // this.player.rotation = 0;
-            if (this.eyes) this.eyes.rotation = -this.player.rotation;
+        const usePuf = !!this.scene.registry.get('pufReady');
+        if (!usePuf) {
+            if (dist > 0 && dist < this._maxStepForRoll) {
+                const dr = dist / this.rollRadius; // theta = s / r
+                this.player.rotation += dr;
+                if (this.eyes) this.eyes.rotation = -this.player.rotation; // keep eyes upright
+            } else if (dist >= this._maxStepForRoll) {
+                // teleport: reset rotation smoothing (optional)
+                // this.player.rotation = 0;
+                if (this.eyes) this.eyes.rotation = -this.player.rotation;
+            }
         }
 
         this._prevX = this.player.x;
