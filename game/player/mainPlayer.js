@@ -112,7 +112,6 @@ export class MainPlayerManager {
         const usePuf = !!this.scene.registry.get('pufReady');
         if (!usePuf) return;
 
-        // Use angle sectors with tolerance to avoid wrong anim on diagonals
         const speed = Math.hypot(vx, vy);
         if (speed < 1 && !this._autoMove) {
             if (this.scene.anims.exists('puf-front') && this.player.anims.currentAnim?.key !== 'puf-front') {
@@ -125,9 +124,14 @@ export class MainPlayerManager {
         const deg = Phaser.Math.RadToDeg(angle);
 
         // Cones around axes (degrees)
-        const VERT_CONE = 28;      // ± around straight up
-        const UP_DIAG_MAX = 70;    // beyond this from up, treat as side/other
-        const HORZ_CONE = 28;      // ± around straight right/left
+        const VERT_CONE = 28;
+        const UP_DIAG_MAX = 70;
+        const HORZ_CONE = 28;
+
+        // New: ratio guard to keep "mostly vertical" as vertical (prevents diagonal/turn on straight down)
+        const absX = Math.abs(vx);
+        const absY = Math.abs(vy);
+        const DIAG_TOL_RATIO = 1.05; // bigger => stricter vertical/horizontal snap
 
         const baseFacesRight = this.scene.registry.get('pufBaseFacesRight');
         const faceRightFlip = (wantRight) => (baseFacesRight === true ? !wantRight : !!wantRight);
@@ -141,32 +145,36 @@ export class MainPlayerManager {
         if (vy < 0) {
             // Moving upwards
             if (upDelta <= VERT_CONE && this.scene.anims.exists('puf-back')) {
-                // Mostly straight up
                 anim = 'puf-back';
                 flipX = false;
             } else if (upDelta <= UP_DIAG_MAX && this.scene.anims.exists('puf-backLeft')) {
-                // Up-diagonal: always use back_left and flip for right
                 anim = 'puf-backLeft';
                 flipX = faceRightFlip(vx > 0);
             } else if (this.scene.anims.exists('puf-side')) {
-                // Farther from up -> treat as side
                 anim = 'puf-side';
                 flipX = faceRightFlip(vx > 0);
             }
         } else {
             // Moving downwards or mostly horizontal
-            const rightDelta = Math.abs(deg - 0);
-            const leftDelta = Math.abs(Math.abs(deg) - 180);
-
-            if ((rightDelta <= HORZ_CONE || leftDelta <= HORZ_CONE) && this.scene.anims.exists('puf-side')) {
-                anim = 'puf-side';
-                flipX = faceRightFlip(vx > 0);
-            } else if (this.scene.anims.exists('puf-threeQuarter') && Math.abs(vx) > 1 && Math.abs(vy) > 1) {
-                anim = 'puf-threeQuarter';
-                flipX = faceRightFlip(vx > 0);
-            } else if (this.scene.anims.exists('puf-front')) {
+            // Strong vertical guard: if vertical dominates, force front (no turn)
+            if (absY >= absX * DIAG_TOL_RATIO && this.scene.anims.exists('puf-front')) {
                 anim = 'puf-front';
-                flipX = faceRightFlip(vx > 0 && Math.abs(vx) > 1); // slight lean when down-diagonal
+                flipX = false;
+            } else {
+                const rightDelta = Math.abs(deg - 0);
+                const leftDelta = Math.abs(Math.abs(deg) - 180);
+
+                if ((rightDelta <= HORZ_CONE || leftDelta <= HORZ_CONE) && this.scene.anims.exists('puf-side')) {
+                    anim = 'puf-side';
+                    flipX = faceRightFlip(vx > 0);
+                } else if (this.scene.anims.exists('puf-threeQuarter') && absX > 1 && absY > 1) {
+                    // Only use turning (3/4) when not mostly vertical/horizontal
+                    anim = 'puf-threeQuarter';
+                    flipX = faceRightFlip(vx > 0);
+                } else if (this.scene.anims.exists('puf-front')) {
+                    anim = 'puf-front';
+                    flipX = false;
+                }
             }
         }
 

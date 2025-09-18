@@ -138,7 +138,15 @@ export class OnlinePlayerManager {
         const dx = x - p.sprite.x;
         const dy = y - p.sprite.y;
         const absX = Math.abs(dx), absY = Math.abs(dy);
-        const DIAG_TOL_RATIO = 10;
+
+        // Match main player's sector logic to avoid wrong diagonal picks
+        const angle = Math.atan2(dy, dx); // 0 = right, -PI/2 = up
+        const deg = Phaser.Math.RadToDeg(angle);
+        const VERT_CONE = 28;
+        const UP_DIAG_MAX = 70;
+        const HORZ_CONE = 28;
+        const DIAG_TOL_RATIO = 1.05; // stronger vertical snap to prevent "turn" when going straight down
+        const upDelta = Math.abs(deg + 90);
 
         const guardAlive = () => p && p.sprite && p.sprite.active && p.sprite.scene;
 
@@ -147,23 +155,39 @@ export class OnlinePlayerManager {
             let anim = 'puf-front';
             let flipX = false;
 
-            if (absY >= absX * DIAG_TOL_RATIO) {
-                if (dy < 0 && this.scene.anims.exists('puf-back')) {
+            if (dy < 0) {
+                // Moving upwards
+                if (upDelta <= VERT_CONE && this.scene.anims.exists('puf-back')) {
                     anim = 'puf-back';
-                } else if (this.scene.anims.exists('puf-front')) {
-                    anim = 'puf-front';
-                }
-            } else if (absX >= absY * DIAG_TOL_RATIO) {
-                anim = this.scene.anims.exists('puf-side') ? 'puf-side' : 'puf-front';
-                flipX = faceRightFlip(dx > 0);
-            } else {
-                if (this.scene.anims.exists('puf-threeQuarter')) {
-                    anim = 'puf-threeQuarter';
+                    flipX = false;
+                } else if (upDelta <= UP_DIAG_MAX && this.scene.anims.exists('puf-backLeft')) {
+                    // Up-diagonal uses backLeft (flip for right)
+                    anim = 'puf-backLeft';
                     flipX = faceRightFlip(dx > 0);
-                } else if (dy < 0 && this.scene.anims.exists('puf-back')) {
-                    anim = 'puf-back';
-                } else if (this.scene.anims.exists('puf-front')) {
+                } else if (this.scene.anims.exists('puf-side')) {
+                    anim = 'puf-side';
+                    flipX = faceRightFlip(dx > 0);
+                }
+            } else {
+                // Moving downwards or mostly horizontal
+                if (absY >= absX * DIAG_TOL_RATIO && this.scene.anims.exists('puf-front')) {
+                    // Force straight down to front (no turning)
                     anim = 'puf-front';
+                    flipX = false;
+                } else {
+                    const rightDelta = Math.abs(deg - 0);
+                    const leftDelta = Math.abs(Math.abs(deg) - 180);
+
+                    if ((rightDelta <= HORZ_CONE || leftDelta <= HORZ_CONE) && this.scene.anims.exists('puf-side')) {
+                        anim = 'puf-side';
+                        flipX = faceRightFlip(dx > 0);
+                    } else if (this.scene.anims.exists('puf-threeQuarter') && absX > 1 && absY > 1) {
+                        anim = 'puf-threeQuarter';
+                        flipX = faceRightFlip(dx > 0);
+                    } else if (this.scene.anims.exists('puf-front')) {
+                        anim = 'puf-front';
+                        flipX = false;
+                    }
                 }
             }
 
